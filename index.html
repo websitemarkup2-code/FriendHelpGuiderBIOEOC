@@ -86,12 +86,27 @@
   .options { list-style: none; display: flex; flex-direction: column; gap: 7px; }
   .options li {
     padding: 9px 14px; border: 2px solid #e8eaf0; border-radius: 8px;
-    cursor: default; font-size: 0.94em; transition: background 0.15s;
+    cursor: pointer; font-size: 0.94em; transition: background 0.15s, border-color 0.15s;
     display: flex; gap: 10px;
   }
+  .options li.selected { background: #d8edff; border-color: #80b3ff; }
+  .options li.correct { background: #dff7dd; border-color: #57a85a; }
+  .options li.incorrect { background: #ffe6e6; border-color: #d85454; }
   .options li span.opt-letter {
     font-weight: bold; color: #555; min-width: 20px;
   }
+  .options li span.opt-text { flex: 1; }
+  .quiz-actions { max-width: 900px; margin: 0 auto 20px; padding: 20px 30px; background: white; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.05); display: flex; flex-direction: column; gap: 14px; }
+  .quiz-actions button { width: fit-content; background: #0074d9; color: white; border: none; padding: 12px 24px; border-radius: 10px; font-size: 1em; cursor: pointer; transition: transform 0.15s ease, background 0.15s ease; }
+  .quiz-actions button:hover { transform: translateY(-1px); background: #005bb5; }
+  .result-panel { display: none; border-radius: 12px; padding: 18px 20px; background: #f4f9ff; color: #1a1a2e; border: 1px solid #d8e8ff; }
+  .result-panel.show { display: block; }
+  .result-panel strong { color: #1a1a2e; }
+  .review-list { margin-top: 14px; display: grid; gap: 10px; }
+  .review-item { background: #fff; border-radius: 10px; padding: 10px 12px; border: 1px solid #e4ecf8; }
+  .review-item span { display: block; font-size: 0.95em; }
+  .review-item .wrong { color: #c0392b; font-weight: bold; }
+  .review-item .correct-answer { color: #2d8f2d; font-weight: bold; }
 
   /* SVG Graph styles */
   .graph-wrap {
@@ -1115,6 +1130,14 @@
 
 </div>
 
+<div class="quiz-actions">
+  <button id="submitQuiz">✅ I'm Done — Submit Answers</button>
+  <div class="result-panel" id="resultPanel">
+    <div id="resultSummary"></div>
+    <div class="review-list" id="reviewList"></div>
+  </div>
+</div>
+
 <!-- ANSWER KEY TOGGLE -->
 <div class="answer-key-toggle">
   <button onclick="document.getElementById('ak').style.display=document.getElementById('ak').style.display==='none'?'block':'none'">
@@ -1170,5 +1193,138 @@
   </div>
 </div>
 
+<script>
+(function() {
+  const storageKey = 'bioEOCQuizAnswers';
+  const savedAnswers = JSON.parse(localStorage.getItem(storageKey) || '{}');
+  const answerKey = {};
+
+  function shuffle(array) {
+    return array.sort(() => Math.random() - 0.5);
+  }
+
+  function saveAnswers() {
+    localStorage.setItem(storageKey, JSON.stringify(savedAnswers));
+  }
+
+  function buildAnswerKey() {
+    document.querySelectorAll('#ak .ak-item').forEach(item => {
+      const qLabel = item.querySelector('.ak-num')?.textContent.trim();
+      const ansLabel = item.querySelector('.ak-ans')?.textContent.trim();
+      if (qLabel && ansLabel) {
+        answerKey[qLabel.replace(/^Q/i, '')] = ansLabel;
+      }
+    });
+  }
+
+  function updateSelectionUI(questionEl, selectedOrig) {
+    questionEl.querySelectorAll('.options li').forEach(li => {
+      li.classList.toggle('selected', li.dataset.orig === selectedOrig);
+      li.classList.remove('correct', 'incorrect');
+    });
+  }
+
+  function renderQuestions() {
+    document.querySelectorAll('.question').forEach(question => {
+      const qNumber = question.querySelector('.q-num')?.textContent.trim();
+      if (!qNumber) return;
+      const optionsList = question.querySelector('.options');
+      const originalItems = Array.from(optionsList.querySelectorAll('li'));
+      const optionData = originalItems.map(li => {
+        const origLabel = li.querySelector('.opt-letter')?.textContent.trim().replace('.', '') || '';
+        const answerText = Array.from(li.childNodes)
+          .slice(1)
+          .map(node => node.outerHTML || node.textContent)
+          .join('')
+          .trim();
+        return { origLabel, answerText };
+      });
+
+      const shuffledOptions = shuffle(optionData.slice());
+      optionsList.innerHTML = '';
+
+      shuffledOptions.forEach((option, index) => {
+        const li = document.createElement('li');
+        li.dataset.orig = option.origLabel;
+        li.innerHTML = '<span class="opt-letter">' + String.fromCharCode(65 + index) + '.</span>' +
+          ' <span class="opt-text">' + option.answerText + '</span>';
+        li.addEventListener('click', () => {
+          savedAnswers[qNumber] = option.origLabel;
+          saveAnswers();
+          updateSelectionUI(question, option.origLabel);
+        });
+        optionsList.appendChild(li);
+      });
+
+      if (savedAnswers[qNumber]) {
+        updateSelectionUI(question, savedAnswers[qNumber]);
+      }
+    });
+  }
+
+  function reviewResults() {
+    const resultPanel = document.getElementById('resultPanel');
+    const resultSummary = document.getElementById('resultSummary');
+    const reviewList = document.getElementById('reviewList');
+    let total = 0;
+    let answered = 0;
+    let correct = 0;
+    reviewList.innerHTML = '';
+
+    document.querySelectorAll('.question').forEach(question => {
+      const qNumber = question.querySelector('.q-num')?.textContent.trim();
+      if (!qNumber) return;
+      total += 1;
+      const selected = savedAnswers[qNumber];
+      const correctAnswer = answerKey[qNumber];
+
+      question.querySelectorAll('.options li').forEach(li => {
+        li.classList.remove('correct', 'incorrect');
+        if (li.dataset.orig === correctAnswer) {
+          li.classList.add('correct');
+        }
+        if (selected && li.dataset.orig === selected && selected !== correctAnswer) {
+          li.classList.add('incorrect');
+        }
+      });
+
+      if (selected) {
+        answered += 1;
+        if (selected === correctAnswer) {
+          correct += 1;
+        } else {
+          const selectedText = question.querySelector('.options li[data-orig="' + selected + '"] .opt-text')?.textContent.trim() || selected;
+          const correctText = question.querySelector('.options li[data-orig="' + correctAnswer + '"] .opt-text')?.textContent.trim() || correctAnswer;
+          const item = document.createElement('div');
+          item.className = 'review-item';
+          item.innerHTML = '<strong>Question ' + qNumber + ':</strong>' +
+            '<span class="wrong">Your answer: ' + selected + ' — ' + selectedText + '</span>' +
+            '<span class="correct-answer">Correct answer: ' + correctAnswer + ' — ' + correctText + '</span>';
+          reviewList.appendChild(item);
+        }
+      } else {
+        const correctText = question.querySelector('.options li[data-orig="' + correctAnswer + '"] .opt-text')?.textContent.trim() || correctAnswer;
+        const item = document.createElement('div');
+        item.className = 'review-item';
+        item.innerHTML = '<strong>Question ' + qNumber + ':</strong>' +
+          '<span class="wrong">Not answered</span>' +
+          '<span class="correct-answer">Correct answer: ' + correctAnswer + ' — ' + correctText + '</span>';
+        reviewList.appendChild(item);
+      }
+    });
+
+    const percent = total > 0 ? Math.round((correct / total) * 100) : 0;
+    resultSummary.innerHTML = '<strong>Score:</strong> ' + correct + ' / ' + total + ' (' + percent + '%)' +
+      '<br><strong>Answered:</strong> ' + answered + ' / ' + total;
+
+    resultPanel.classList.add('show');
+    resultPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  buildAnswerKey();
+  renderQuestions();
+  document.getElementById('submitQuiz').addEventListener('click', reviewResults);
+})();
+</script>
 </body>
 </html>
